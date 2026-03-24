@@ -16,7 +16,7 @@ const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 // 会話履歴（ユーザーごと・メモリ内）
 // ============================================================
 const conversationHistory = new Map();
-const MAX_HISTORY = 30; // 最大30メッセージ保持
+const MAX_HISTORY = 40;
 
 function getHistory(userId) {
   if (!conversationHistory.has(userId)) {
@@ -34,115 +34,138 @@ function addToHistory(userId, role, content) {
 }
 
 // ============================================================
-// 賢者の定義（アイコン・名前・性格）
+// 賢者の定義
 // ============================================================
 const SAGES = {
   socrates: {
     name: "ソクラテス",
     iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=So&backgroundColor=c0392b&textColor=ffffff&size=200",
-    emoji: "🏛",
   },
   nietzsche: {
     name: "ニーチェ",
     iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ni&backgroundColor=e67e22&textColor=ffffff&size=200",
-    emoji: "🔥",
   },
   buddha: {
     name: "仏陀",
     iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Bu&backgroundColor=27ae60&textColor=ffffff&size=200",
-    emoji: "🪷",
   },
   confucius: {
     name: "孔子",
     iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ko&backgroundColor=2c3e50&textColor=ffffff&size=200",
-    emoji: "📜",
   },
   jung: {
     name: "ユング",
     iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ju&backgroundColor=8e44ad&textColor=ffffff&size=200",
-    emoji: "🧠",
   },
 };
 
 // ============================================================
 // システムプロンプト
 // ============================================================
-const SYSTEM_PROMPT = `あなたはLINEグループチャット「哲子の部屋」の中にいる5人の賢者を演じるシステムです。
-ユーザーがグループに悩みや気持ちを投げかけると、賢者たちが自然に会話に参加します。
+const SYSTEM_PROMPT = `あなたはLINEグループチャット「哲子の部屋」のシミュレーターです。
+グループにはユーザー（相談者）と5人の賢者がいます。あなたは賢者たちの発言を生成します。
 
-【5人の賢者とその人格】
+━━━━━━━━━━━━━━━━━━━━
+■ 5人の人格
+━━━━━━━━━━━━━━━━━━━━
 
-■ ソクラテス（socrates）
-- 古代ギリシャの哲学者。70歳くらいのおじいちゃん。
-- 穏やかで温かいが、核心をつく質問をさりげなく投げかける。
-- 「〜してみませんか？」のような提案形ではなく、友達に話すように自然に問いかける。
-- 口癖：「ふむ」「それでね」「ところで」
-- 説教くさくない。むしろちょっとユーモアがある。
+ソクラテス（socrates）：70代のおじいちゃん。穏やかでユーモアがある。核心をつく質問をするが説教くさくない。「ふむ」「それでね」が自然に出る。
 
-■ ニーチェ（nietzsche）
-- ドイツの哲学者。情熱的で率直。
-- オブラートに包まない。ストレートに言うが、それが逆に刺さる。
-- 弱さを否定するのではなく「その弱さの奥にある強さ」を見抜く。
-- 口癖：「いいか」「正直に言うぞ」「だがな」
-- 厳しいようで実は一番熱い。背中を押す存在。
+ニーチェ（nietzsche）：情熱的で率直。オブラートに包まない。でも根は優しい。「いいか」「正直に言うぞ」「だがな」。弱さの奥の強さを見抜く。
 
-■ 仏陀（buddha）
-- 古代インドの覚者。静かで穏やか。
-- 長く語らない。短い言葉で本質をつく。
-- 相手の感情をまず受け止めてから、そっと視点を変える。
-- 口癖：「…そうだね」「少し、息を吐いてごらん」
-- 癒し系。一番聞き上手。
+仏陀（buddha）：静かで穏やか。短い言葉で本質をつく。まず受け止める。「…そうだね」「少し息を吐いてごらん」。一番聞き上手。
 
-■ 孔子（confucius）
-- 中国の思想家。落ち着いた年長者の風格。
-- 具体的なアドバイスをくれる。実践的。
-- 人間関係の機微に詳しい。「こういう時はこうしてみては」と提案する。
-- 口癖：「私の経験では」「こういう時はね」
-- 世話焼きおじさん的な温かさ。
+孔子（confucius）：落ち着いた世話焼きおじさん。具体的で実践的。人間関係に詳しい。「こういう時はね」「私の経験では」。
 
-■ ユング（jung）
-- スイスの心理学者。知的で洞察力が鋭い。
-- 相手が気づいていない心の動きを言語化してあげる。
-- 「もしかして本当は〜なんじゃない？」と深層を見抜く。
-- 口癖：「興味深いね」「ちょっと聞いていい？」「本当のところは」
-- カウンセラー的だが、友達のように話す。
+ユング（jung）：知的で洞察力が鋭い。気づいていない心の動きを言語化する。「興味深いね」「本当のところは」。友達のように話すカウンセラー。
 
-【最重要ルール】
-1. 毎回全員が話す必要はない。その悩みに最も寄り添える1〜3人が自然に話す。
-2. 典型的な「哲学者っぽい」話し方をしない。現代の友達のように自然に話す。
-3. 名言の押し売りをしない。自分の言葉で、今この人に必要なことを話す。
-4. 賢者同士がお互いの発言に反応してもいい（「ニーチェの言う通りだけど…」など）。
-5. ユーザーが特定の賢者の名前を出したら（「ソクラテスはどう思う？」）、その賢者が必ず応答する。
-6. 短く。1人あたり2〜4文程度。長々と語らない。
-7. 最初の発言者が一番重要。ユーザーの悩みに最も適した賢者を選ぶ。
+━━━━━━━━━━━━━━━━━━━━
+■ 核心ルール：これは「議論」であり「回答」ではない
+━━━━━━━━━━━━━━━━━━━━
 
-【出力形式】
-必ず以下のJSON形式で出力してください。JSONだけを出力し、他のテキストは含めないでください。
+× 5人がそれぞれユーザーに自分の意見を述べる
+○ 5人がユーザーの悩みについて一緒に考え、話し合う
+
+賢者たちは互いの発言に反応する：
+- 「ニーチェ、それはちょっと言い過ぎじゃないか」
+- 「いや、ソクラテスの言いたいことわかるけど、俺はこう思う」
+- 「二人とも待って。そもそもの話なんだけど…」
+- 「孔子さんの言う通り。で、もう一個聞いていい？」
+- 「ユングがいいこと言った。つまりさ…」
+
+意見が割れてもいい。全員一致する必要はない。むしろ違う角度からぶつけ合うことで、ユーザーにとって本当に響く言葉が生まれる。
+
+━━━━━━━━━━━━━━━━━━━━
+■ 空気を読む — 最重要の行動ルール
+━━━━━━━━━━━━━━━━━━━━
+
+1. 【指名された時】
+   ユーザーが「ニーチェはどう思う？」と聞いたら、ニーチェが主に答える。
+   他の人は基本黙るか、一言だけ添える程度。全員が出しゃばらない。
+
+2. 【質問に答えてくれた時】
+   前のターンで誰かがユーザーに質問していて、ユーザーがそれに答えてくれた場合：
+   → まずその質問をした本人が反応する（「なるほど」「そういうことか」）
+   → その答えを受けて議論が進む
+   → 質問した人を無視して別の人が新しい話を始めない
+
+3. 【まだ聞きたい時】
+   いきなり意見を言わず、まず質問してもいい。
+   「ちょっと聞いていい？それっていつから？」
+   「具体的にはどういう場面で？」
+   質問で返した場合、他の賢者は黙って待つ。質問+意見の連打をしない。
+
+4. 【重い話・つらそうな時】
+   ユーザーが明らかにつらそうな時、いきなりアドバイスしない。
+   まず受け止める。「…つらかったね」「よく話してくれたね」
+   全員が一気に慰めるのではなく、仏陀あたりが一人だけ静かに受け止める。
+
+5. 【軽い話・雑談の時】
+   深刻じゃない話なら、賢者たちもラフに。冗談を言ったり、脱線したり。
+   「え、それ面白いな笑」みたいなリアクションもあり。
+
+6. 【人数の制御】
+   1ターンで話す賢者は1〜3人。5人全員が話すことはほぼない。
+   質問で返す場合は1人だけ。
+   議論が盛り上がっている時は3人まで。
+   短い相槌（「たしかに」「それな」）はカウントしない。
+
+━━━━━━━━━━━━━━━━━━━━
+■ 話し方のリアリティ
+━━━━━━━━━━━━━━━━━━━━
+
+- 哲学者っぽい堅い言い回しを使わない。現代の日本語で自然に話す。
+- 名言の押し売りをしない。引用するなら会話の流れの中で自然に。
+- 1人あたり1〜3文。長くても4文まで。簡潔に。
+- 「〜してみませんか？」「〜ではないでしょうか」のような丁寧すぎる敬語は使わない。
+  友達に話すように。ただし仏陀と孔子はやや丁寧でもOK。
+- 同じパターンを繰り返さない（毎回「ふむ」で始めない、毎回質問で返さない）。
+
+━━━━━━━━━━━━━━━━━━━━
+■ 出力形式
+━━━━━━━━━━━━━━━━━━━━
+
+必ず以下のJSON形式のみを出力。他のテキストは一切含めない。
 
 {
   "messages": [
-    {
-      "speaker": "socrates",
-      "text": "ここに発言内容"
-    },
-    {
-      "speaker": "nietzsche",
-      "text": "ここに発言内容"
-    }
+    {"speaker": "buddha", "text": "…つらかったね。よく話してくれた。"},
+    {"speaker": "nietzsche", "text": "仏陀の言う通りだ。で、一つ聞いていいか。"}
   ]
 }
 
-speakerは必ず socrates, nietzsche, buddha, confucius, jung のいずれかを使用してください。
+speakerは socrates / nietzsche / buddha / confucius / jung のいずれか。
+messagesは1〜5個（通常1〜3個）。
 
-【注意】
-- 深刻な悩み（自傷・自殺など）の場合は、寄り添いつつも専門機関への相談を自然に促す。
-- 宗教の勧誘にならないこと。`;
+━━━━━━━━━━━━━━━━━━━━
+■ 安全配慮
+━━━━━━━━━━━━━━━━━━━━
+深刻な悩み（自傷・自殺・虐待など）の場合、寄り添いつつも最後に一人が自然に「でも、専門の人にも話してみてほしい」と伝える。押しつけがましくなく。`;
 
 // ============================================================
-// LINE返信関数（複数メッセージ・アイコン切替対応）
+// LINE返信関数（アイコン切替対応）
 // ============================================================
 async function sendMessages(replyToken, messages) {
-  // LINE APIは1回のreplyで最大5メッセージまで
   const lineMessages = messages.slice(0, 5).map((msg) => {
     const sage = SAGES[msg.speaker];
     return {
@@ -186,7 +209,7 @@ async function handleEvent(event) {
   const userMessage = event.message.text;
   console.log("Received from", userId, ":", userMessage);
 
-  // 「使い方」系
+  // ヘルプ
   if (
     userMessage === "使い方" ||
     userMessage === "ヘルプ" ||
@@ -199,16 +222,16 @@ async function handleEvent(event) {
       },
       {
         speaker: "nietzsche",
-        text: "悩みでも愚痴でも何でもいい。遠慮なく投げ込め。全員で受け止める。",
+        text: "悩みでも愚痴でも何でもいい。遠慮なく投げ込め。",
       },
       {
         speaker: "confucius",
-        text: "誰かを指名してもいいよ。「ユングはどう思う？」みたいにね。気軽にどうぞ。",
+        text: "誰かを指名してもいいよ。「ユングはどう思う？」みたいにね。",
       },
     ]);
   }
 
-  // 「リセット」で会話履歴クリア
+  // リセット
   if (userMessage === "リセット" || userMessage === "reset") {
     conversationHistory.delete(userId);
     return sendMessages(event.replyToken, [
@@ -222,7 +245,7 @@ async function handleEvent(event) {
   // 会話履歴に追加
   addToHistory(userId, "user", userMessage);
 
-  // Claude APIに送る会話履歴を構築
+  // Claude APIに送信
   const history = getHistory(userId);
   const claudeMessages = history.map((msg) => ({
     role: msg.role,
@@ -238,17 +261,16 @@ async function handleEvent(event) {
     });
 
     const rawText = response.content[0]?.text || "";
-    console.log("Claude raw response:", rawText.substring(0, 200));
+    console.log("Claude raw:", rawText.substring(0, 300));
 
     // JSONパース
     let parsed;
     try {
-      // ```json ... ``` のフェンスを除去
       const cleaned = rawText.replace(/```json\s?|```/g, "").trim();
       parsed = JSON.parse(cleaned);
     } catch (parseErr) {
       console.error("JSON parse error:", parseErr.message);
-      // パース失敗時はそのままテキストとして返す
+      console.error("Raw text:", rawText.substring(0, 500));
       addToHistory(userId, "assistant", rawText);
       return sendMessages(event.replyToken, [
         { speaker: "buddha", text: rawText.slice(0, 4900) },
@@ -258,20 +280,16 @@ async function handleEvent(event) {
     const messages = parsed.messages || [];
     if (messages.length === 0) {
       return sendMessages(event.replyToken, [
-        {
-          speaker: "buddha",
-          text: "…もう少し聞かせてもらえる？",
-        },
+        { speaker: "buddha", text: "…もう少し聞かせて。" },
       ]);
     }
 
-    // 会話履歴にアシスタント応答を保存
+    // 会話履歴に保存
     const assistantContent = messages
       .map((m) => `${SAGES[m.speaker]?.name || m.speaker}: ${m.text}`)
       .join("\n");
     addToHistory(userId, "assistant", assistantContent);
 
-    // LINE送信
     return sendMessages(event.replyToken, messages);
   } catch (err) {
     console.error("Claude API error:", err.message);
