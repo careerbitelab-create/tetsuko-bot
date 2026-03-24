@@ -1,11 +1,9 @@
 const express = require("express");
-const crypto = require("crypto");
 const Anthropic = require("@anthropic-ai/sdk");
 
 // ============================================================
 // 環境変数
 // ============================================================
-const CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET;
 const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -13,17 +11,6 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // クライアント初期化
 // ============================================================
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-
-// ============================================================
-// LINE署名検証
-// ============================================================
-function validateSignature(body, signature) {
-  const hash = crypto
-    .createHmac("SHA256", CHANNEL_SECRET)
-    .update(body)
-    .digest("base64");
-  return hash === signature;
-}
 
 // ============================================================
 // LINE返信関数
@@ -146,23 +133,13 @@ async function handleEvent(event) {
 const app = express();
 
 // Webhookエンドポイント
-app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
-  const signature = req.headers["x-line-signature"];
-  const body = req.body.toString();
-
-  // 署名検証
-  if (!validateSignature(body, signature)) {
-    console.error("Invalid signature");
-    return res.status(401).send("Invalid signature");
-  }
-
+app.post("/webhook", express.json(), async (req, res) => {
   // すぐに200を返す（LINEのタイムアウト防止）
   res.status(200).send("OK");
 
   // イベント処理（バックグラウンド）
   try {
-    const parsed = JSON.parse(body);
-    const events = parsed.events || [];
+    const events = req.body.events || [];
     console.log("Events received:", events.length);
 
     for (const event of events) {
