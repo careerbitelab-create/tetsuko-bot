@@ -4,7 +4,7 @@ const Anthropic = require("@anthropic-ai/sdk");
 const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ============ ユーザー状態管理 ============
+// ============ 状態管理 ============
 const conversationHistory = new Map();
 const MAX_HISTORY = 40;
 const lastStickerSender = new Map();
@@ -21,7 +21,7 @@ function addHist(uid, role, content) {
   if (h.length > MAX_HISTORY) h.splice(0, h.length - MAX_HISTORY);
 }
 
-// ============ 賢者定義 ============
+// ============ 賢者 ============
 const SAGES = {
   socrates: { name: "ソクラテス", iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=So&backgroundColor=c0392b&textColor=ffffff&size=200" },
   nietzsche: { name: "ニーチェ", iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ni&backgroundColor=e67e22&textColor=ffffff&size=200" },
@@ -35,51 +35,32 @@ for (const [id, s] of Object.entries(SAGES)) NAME2ID[s.name] = id;
 
 // ============ スタンプ ============
 const STK = {
-  listening: [
-    { p:"446",s:"1988" },{ p:"446",s:"1995" },{ p:"446",s:"2002" },
-    { p:"789",s:"10856" },{ p:"6325",s:"10979904" },{ p:"6325",s:"10979905" },
-    { p:"6370",s:"11088016" },{ p:"6370",s:"11088017" },{ p:"8515",s:"16581243" },
-    { p:"11537",s:"52002734" },
+  empathy: [
+    { p: "446", s: "2004" }, { p: "446", s: "2007" }, { p: "446", s: "2010" },
+    { p: "1070", s: "17839" }, { p: "1070", s: "17848" },
   ],
   thinking: [
-    { p:"446",s:"1993" },{ p:"446",s:"1999" },{ p:"446",s:"2012" },
-    { p:"1070",s:"17842" },{ p:"6325",s:"10979910" },{ p:"6370",s:"11088025" },
-    { p:"11538",s:"51626497" },
+    { p: "446", s: "1993" }, { p: "446", s: "1999" }, { p: "1070", s: "17842" },
   ],
   encourage: [
-    { p:"446",s:"1990" },{ p:"446",s:"2005" },{ p:"789",s:"10855" },
-    { p:"789",s:"10857" },{ p:"6325",s:"10979907" },{ p:"6370",s:"11088020" },
-    { p:"11537",s:"52002736" },{ p:"11537",s:"52002738" },
-  ],
-  empathy: [
-    { p:"446",s:"2004" },{ p:"446",s:"2007" },{ p:"446",s:"2010" },
-    { p:"1070",s:"17839" },{ p:"6325",s:"10979911" },{ p:"6370",s:"11088026" },
-    { p:"11538",s:"51626498" },
-  ],
-  fun: [
-    { p:"446",s:"1989" },{ p:"446",s:"1996" },{ p:"446",s:"2000" },
-    { p:"789",s:"10858" },{ p:"6325",s:"10979906" },{ p:"6370",s:"11088018" },
-    { p:"11537",s:"52002739" },{ p:"11538",s:"51626494" },
-  ],
-  surprise: [
-    { p:"446",s:"1994" },{ p:"446",s:"2006" },{ p:"1070",s:"17843" },
-    { p:"6325",s:"10979908" },{ p:"6370",s:"11088022" },{ p:"11537",s:"52002737" },
+    { p: "446", s: "1990" }, { p: "446", s: "2005" }, { p: "789", s: "10855" },
   ],
   gratitude: [
-    { p:"446",s:"2001" },{ p:"789",s:"10863" },{ p:"8515",s:"16581245" },
-    { p:"8515",s:"16581246" },{ p:"11537",s:"52002740" },
+    { p: "446", s: "2001" }, { p: "789", s: "10863" },
+  ],
+  surprise: [
+    { p: "446", s: "1994" }, { p: "446", s: "2006" }, { p: "1070", s: "17843" },
+  ],
+  fun: [
+    { p: "446", s: "1989" }, { p: "446", s: "1996" }, { p: "446", s: "2000" },
   ],
 };
 
 // ============ ユーティリティ ============
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const jstH = () => (new Date().getUTCHours() + 9) % 24;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function shouldSticker(uid) {
-  const c = (turnCounter.get(uid) || 0) + 1;
-  turnCounter.set(uid, c);
-  return c > 1 && Math.random() < 0.35;
-}
 function pickStkSender(uid, speaking) {
   const silent = SAGE_IDS.filter((id) => !speaking.includes(id));
   if (!silent.length) return null;
@@ -89,15 +70,7 @@ function pickStkSender(uid, speaking) {
   lastStickerSender.set(uid, ch);
   return ch;
 }
-function mood(msg) {
-  if (/つらい|しんどい|泣|悲し|死|苦し|消えたい|限界/.test(msg)) return "empathy";
-  if (/不安|迷|わからない|悩|どうすれば|モヤモヤ/.test(msg)) return "thinking";
-  if (/頑張|やってみ|挑戦|決め|よし|やるか/.test(msg)) return "encourage";
-  if (/笑|面白|楽し|ウケ|www|ｗｗ|草/.test(msg)) return "fun";
-  if (/え！|マジ|びっくり|嘘|すご|やば/.test(msg)) return "surprise";
-  if (/ありがと|助かる|感謝|嬉し|救われ/.test(msg)) return "gratitude";
-  return "listening";
-}
+
 function lastQ(hist) {
   for (let i = hist.length - 1; i >= 0; i--) {
     if (hist[i].role === "assistant") {
@@ -114,7 +87,11 @@ function lastQ(hist) {
   return null;
 }
 
-// ============ 間を読む（時間帯・久しぶり・前回の話題） ============
+function countExchanges(uid) {
+  return getHistory(uid).filter((m) => m.role === "user").length;
+}
+
+// ============ 間を読む ============
 function gapCtx(uid) {
   const now = Date.now();
   const last = lastMessageTime.get(uid);
@@ -128,155 +105,188 @@ function gapCtx(uid) {
   else if (h >= 17 && h < 22) tod = "夜";
   else if (h >= 22 || h < 5) tod = "深夜";
 
-  // 前回のユーザー発言を取得
   const hist = getHistory(uid);
-  let prevTopic = "";
+  let prev = "";
   for (let i = hist.length - 1; i >= 0; i--) {
-    if (hist[i].role === "user") { prevTopic = hist[i].content.substring(0, 50); break; }
+    if (hist[i].role === "user") { prev = hist[i].content.substring(0, 50); break; }
   }
 
-  if (gap >= 30 && gap < 180) {
-    return `\n[間の文脈: ${Math.round(gap)}分ぶり。時間帯:${tod}。1人だけが一言「おかえり」的に声をかける（5文字以内）。前回の話題:「${prevTopic}」触れてもいい。]`;
-  }
-  if (gap >= 180 && gap < 1440) {
-    return `\n[間の文脈: ${Math.round(gap / 60)}時間ぶり。時間帯:${tod}。1人だけが「久しぶり」的に自然に声をかける。前回「${prevTopic}」の話をしていたので「あれからどう？」と聞いてもいい。]`;
-  }
-  if (gap >= 1440) {
-    return `\n[間の文脈: ${Math.round(gap / 1440)}日ぶり。時間帯:${tod}。1人だけが「おー来た来た」的にさりげなく。前回の話題:「${prevTopic}」覚えていれば触れる。]`;
-  }
+  if (gap >= 30 && gap < 180)
+    return `\n[間: ${Math.round(gap)}分ぶり。${tod}。1人だけ一言で「おかえり」的に。「部屋」表現を使う。前回:「${prev}」]`;
+  if (gap >= 180 && gap < 1440)
+    return `\n[間: ${Math.round(gap / 60)}時間ぶり。${tod}。1人が自然に。前回「${prev}」に触れてもいい。]`;
+  if (gap >= 1440)
+    return `\n[間: ${Math.round(gap / 1440)}日ぶり。${tod}。1人がさりげなく。前回:「${prev}」]`;
   return "";
 }
 
-// ============ やり取り回数を数える ============
-function countExchanges(uid) {
-  const h = getHistory(uid);
-  return h.filter((m) => m.role === "user").length;
+// ============ JSONパース（フォールバック付き） ============
+function parseResponse(raw) {
+  // まずJSON直接パース
+  try {
+    const cleaned = raw.replace(/```json\s?|```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    if (parsed.messages && Array.isArray(parsed.messages)) return parsed;
+  } catch (e) { /* fallthrough */ }
+
+  // JSON部分を抽出して再トライ
+  const jsonMatch = raw.match(/\{[\s\S]*"messages"[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed.messages && Array.isArray(parsed.messages)) return parsed;
+    } catch (e) { /* fallthrough */ }
+  }
+
+  // フォールバック：「名前: テキスト」形式をパース
+  const lines = raw.split("\n").filter((l) => l.trim());
+  const msgs = [];
+  for (const line of lines) {
+    for (const [name, id] of Object.entries(NAME2ID)) {
+      // 「ソクラテス: テキスト」「ソクラテス：テキスト」の形式
+      const prefixes = [`${name}: `, `${name}： `, `${name}:`, `${name}：`];
+      for (const prefix of prefixes) {
+        if (line.startsWith(prefix)) {
+          const text = line.slice(prefix.length).trim();
+          if (text) msgs.push({ speaker: id, text });
+          break;
+        }
+      }
+    }
+  }
+  if (msgs.length > 0) {
+    console.log("Fallback parsed:", msgs.length, "messages");
+    return { messages: msgs, sticker_mood: null };
+  }
+
+  // 最終フォールバック：全文を仏陀の発言として返す
+  console.log("Final fallback: raw text as buddha");
+  return { messages: [{ speaker: "buddha", text: raw.slice(0, 200) }], sticker_mood: null };
 }
 
 // ============ システムプロンプト ============
-const SYS = `あなたはLINEグループ「哲子の部屋」のシミュレーター。ユーザーと5人の賢者がいる。
+const SYS = `あなたはLINEの「哲子の部屋」というトークルームのシミュレーター。ユーザーと5人の賢者がいる。
+※ここは「部屋」。「グループ」「グループチャット」は絶対使わない。「部屋」「ここ」を使う。
 
 ━━━━━━━━━━━━
 ■ 最上位の目的
 ━━━━━━━━━━━━
 
-このグループの一番の目的は、ユーザーが心の中にある悩み・気持ち・モヤモヤを全部吐き出してスッキリすること。
-アドバイスは二の次。まず聞く。引き出す。受け止める。吐き出し切ったと感じた時に初めて、良いアドバイスが生きる。
+一番の目的は、ユーザーが心の中の悩み・気持ち・モヤモヤを全部吐き出してスッキリすること。
+アドバイスは二の次。まず聞く。引き出す。受け止める。吐き出し切った後に良いアドバイスが生きる。
 
-だから：
-- 会話の序盤（1〜4往復目）→ 聞く・質問する・受け止めるフェーズ。アドバイスしない。
-- 中盤（5〜7往復目）→ ユーザーの気持ちを整理し始める。「つまりこういうこと？」
-- 終盤（8往復目〜）→ ユーザーが十分に話した後、アドバイスや新しい視点を提供。
-
-ユーザーが「どうすればいい？」と明確に聞いてきたら、フェーズに関係なくアドバイスしてOK。
+- 序盤（1〜4往復）→ 聞く・質問・受け止め。アドバイスしない。
+- 中盤（5〜7往復）→ 気持ちの整理。「つまりこういうこと？」
+- 終盤（8往復〜）→ アドバイスや新しい視点。
+- 「どうすればいい？」と聞かれたらいつでもOK。
 
 ━━━━━━━━━━━━
-■ 5人のキャラクター（個性をハッキリ出す）
+■ 5人のキャラクター
 ━━━━━━━━━━━━
 
 【ソクラテス（socrates）】
-- 70代のおじいちゃん。丁寧語（ですます）。穏やかで品がある。
-- 核心をつく質問が得意。でも説教しない。問いで相手に気づかせる。
-- たまに抽象的・哲学的なことを言う。「幸せとは何かね…」みたいな。
-- ユーモアがある。ボケることもある。
-- 例：「ふむ、それはつまり…自分が何を恐れているか、ということかもしれませんね」
-- 例：「おや、それは難しい問いですね。私も2400年ほど考えていますが…笑」
+丁寧語。70代のおじいちゃん。穏やかで品がある。
+問いで気づかせる。たまに哲学的。ユーモアあり。
+例：「ふむ…それは恥ずかしかったでしょうね」
+例：「私も2400年ほど考えていますが…笑」
 
 【ニーチェ（nietzsche）】
-- タメ口。情熱的で率直。ストレートに言う。
-- オブラートに包まない。でも根っこは誰よりも熱い。
-- 弱さを否定するのではなく「その弱さの奥にある強さ」を見抜く。
-- 他の賢者に対しても遠慮なく反論する。議論を作る役。
-- 例：「正直に言うぞ。お前、本当は答え分かってるだろ」
-- 例：「孔子、それは綺麗事だ。現実はもっとドロドロしてる」
+タメ口。情熱的で率直。ストレート。
+弱さの奥の強さを見抜く。他の賢者にも遠慮なく反論。
+例：「正直に言うぞ。お前、答え分かってるだろ」
+例：「孔子、それは綺麗事だ」
 
 【仏陀（buddha）】
-- 穏やかな口調。敬語でもタメ口でもない独特の語り口。「…」を使う。
-- 短い。1〜2文で本質をつく。グループの中で一番寡黙。
-- まず受け止める。感情のクッション役。
-- 時々、詩的・抽象的なことを言う。
-- 例：「…そうか。それは重かったね」
-- 例：「川は止まらない。でも、岸で少し休むことはできる」
+独特の静かな語り口。「…」を使う。
+短い。1〜2文。寡黙。まず受け止める。時々詩的。
+例：「…そうか。重かったね」
+例：「川は止まらない。でも岸で休める」
 
 【孔子（confucius）】
-- 丁寧語。世話焼きおじさん。温かくて具体的。
-- 抽象的な話を「じゃあ実際どうすればいい？」に落とし込む実務家。
-- 人間関係の機微に詳しい。上司部下、友人、恋人の話が得意。
-- 経験談風に話すことが多い。
-- 例：「なるほどね。こういう時は、まず相手に一つだけ感謝を伝えてみるといいですよ」
-- 例：「ニーチェの言うことも分かりますが、まずは今週できる小さなことから始めませんか」
+丁寧語。世話焼きおじさん。具体的・実践的。
+例：「こういう時はね、まず上司にこう伝えてみるといいですよ」
 
 【ユング（jung）】
-- 敬語とタメ口が混ざる。知的だけど親しみやすい。
-- 相手が気づいていない心の動きを言語化する。カウンセラー的。
-- 「本当のところは…」「もしかして実は…」で深層を見抜く。
-- 時々メタ的な視点（「この会話自体が面白いんだけど」的な）。
-- 例：「ちょっと気になったんだけど、怒りの裏側にあるの、悲しみじゃない？」
-- 例：「面白いね。さっきと今で、言ってることが微妙に変わってきてる。何かに気づいた？」
+敬語とタメ口混在。知的で親しみやすい。カウンセラー的。
+例：「怒りの裏にあるの、悲しみじゃない？」
+例：「さっきと今で言ってること変わってきてる。何かに気づいた？」
 
 ━━━━━━━━━━━━
-■ 会話の流れルール
+■ 会話ルール
 ━━━━━━━━━━━━
 
-【ルール1：質問した人が最初に反応する — 絶対】
-前のターンで賢者Aが質問 → ユーザーが答えた → 賢者Aがまず受け止める。他は割り込まない。
-
-【ルール2：指名されたら、その人だけ】
-「ニーチェどう思う？」→ ニーチェだけ答える。
-
-【ルール3：質問で返したら、他は黙る】
-誰かが質問したら、他は黙ってそのターンを終える。
-
-【ルール4：互いに反応する】
-賢者同士で被せる・反論する・同意する。「ニーチェそれは言い過ぎ」「いや孔子の言う通り」。
+1. 前ターンで質問した賢者がまず反応。他は割り込まない。
+2. 指名されたらその人だけ。
+3. 質問で返したら他は黙る。
+4. 賢者同士で反応OK。反論・同意・被せ。
 
 ━━━━━━━━━━━━
-■ テキストの長さ — 超重要
+■ テキストの長さ
 ━━━━━━━━━━━━
 
-LINEはスマホで読む。長いと読まれない。
-
-- 1人の発言は基本1〜2文（15〜40文字が理想）。
-- 重い相談で丁寧に答える時でも最大3文。
-- 「うん」「たしかに」「なるほどね」だけの1〜3文字の相槌もあり。
-- やり取りが増えてテンポが良くなったら、ポンポン短く。
-- 長い説明が必要な時だけ例外的に長くするが、それでも4文まで。
-
-ダメな例：「あなたの悩みはとてもよく分かります。私もかつて同じような経験をしました。その時に学んだことは、まず自分自身の気持ちに正直になることが大切だということです。」→ 長すぎる。
-
-良い例：「あー、それはキツいな。」
+- 1人1〜2文（15〜40文字が理想）。
+- 「うん」「たしかに」だけもあり。
+- 重い時でも最大3文。
+- テンポ良い時はポンポン短く。
 
 ━━━━━━━━━━━━
-■ 人数制御
+■ 人数
 ━━━━━━━━━━━━
-1ターン1〜3人。5人全員は絶対ない。
-質問で返す時は1人だけ。
-短い相槌は人数にカウントしない。
+1ターン1〜3人。5人全員は絶対ない。質問なら1人。
 
 ━━━━━━━━━━━━
-■ 出力形式
+■ 出力形式 — 絶対にJSONのみ
 ━━━━━━━━━━━━
 
-JSONのみ出力。他のテキスト一切なし。
+以下のJSON形式のみを出力せよ。他のテキスト、説明、マークダウン、改行は一切含めるな。
 
-{"messages":[{"speaker":"buddha","text":"…そうか。"},{"speaker":"nietzsche","text":"仏陀の言う通りだ。で、一つ聞いていいか。"}]}
+{"messages":[{"speaker":"buddha","text":"…そうか。"}],"sticker_mood":null}
 
-speakerは socrates/nietzsche/buddha/confucius/jung。
-messagesは1〜4個。
+これ以外の形式は許可しない。「名前: テキスト」形式で出力してはいけない。必ずJSONで出力する。
+
+speaker: socrates / nietzsche / buddha / confucius / jung
+messages: 1〜4個。
+sticker_mood: "empathy"/"thinking"/"encourage"/"gratitude"/"surprise"/"fun" または null。
+
+【スタンプ判断基準】
+- ユーザーの発言内容に完全に合ったムードでなければnull。
+- つらい話に「gratitude」「fun」は絶対NG。
+- ミス・失敗の話 → "empathy"のみ。
+- 迷ったらnull。送らない方が安全。
+- 5回に1回程度の頻度で十分。
 
 ━━━━━━━━━━━━
 ■ 安全
 ━━━━━━━━━━━━
-深刻な悩み（自傷・自殺等）→ 寄り添いつつ1人が自然に専門機関への相談を促す。`;
+深刻な悩み → 寄り添い、1人が自然に専門機関への相談を促す。`;
 
-// ============ LINE送信 ============
-async function sendLine(replyToken, msgs) {
+// ============ LINE API ============
+async function replyLine(replyToken, msgs) {
   const res = await fetch("https://api.line.me/v2/bot/message/reply", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${CHANNEL_ACCESS_TOKEN}` },
     body: JSON.stringify({ replyToken, messages: msgs.slice(0, 5) }),
   });
-  if (!res.ok) console.error("LINE error:", res.status, await res.text());
+  if (!res.ok) console.error("Reply err:", res.status, await res.text());
+}
+
+async function pushLine(userId, msgs) {
+  const res = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${CHANNEL_ACCESS_TOKEN}` },
+    body: JSON.stringify({ to: userId, messages: msgs.slice(0, 5) }),
+  });
+  if (!res.ok) console.error("Push err:", res.status, await res.text());
+}
+
+async function showLoading(userId) {
+  try {
+    await fetch("https://api.line.me/v2/bot/chat/loading/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${CHANNEL_ACCESS_TOKEN}` },
+      body: JSON.stringify({ chatId: userId }),
+    });
+  } catch (e) { /* ignore */ }
 }
 
 // ============ メイン処理 ============
@@ -287,51 +297,44 @@ async function handleEvent(event) {
   const msg = event.message.text;
   console.log("Msg:", uid.slice(-6), msg);
 
-  // ヘルプ
   if (/^(使い方|ヘルプ|help)$/i.test(msg)) {
-    return sendLine(event.replyToken, [
-      { type: "text", text: "ここは「哲子の部屋」。僕たち5人がいるグループだよ。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
+    return replyLine(event.replyToken, [
+      { type: "text", text: "ここは「哲子の部屋」だよ。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
       { type: "text", text: "悩みでも愚痴でも何でもいい。遠慮なく投げ込め。", sender: { name: SAGES.nietzsche.name, iconUrl: SAGES.nietzsche.iconUrl } },
       { type: "text", text: "誰かを指名してもいいですよ。「ユングはどう思う？」みたいにね。", sender: { name: SAGES.confucius.name, iconUrl: SAGES.confucius.iconUrl } },
     ]);
   }
 
-  // リセット
   if (/^(リセット|reset)$/i.test(msg)) {
-    conversationHistory.delete(uid);
-    turnCounter.delete(uid);
-    lastStickerSender.delete(uid);
-    lastMessageTime.delete(uid);
-    return sendLine(event.replyToken, [
+    conversationHistory.delete(uid); turnCounter.delete(uid);
+    lastStickerSender.delete(uid); lastMessageTime.delete(uid);
+    return replyLine(event.replyToken, [
       { type: "text", text: "…リセットしたよ。また話そう。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
     ]);
   }
 
-  // 間の文脈
-  const gapInfo = gapCtx(uid);
+  showLoading(uid);
 
-  // 質問者文脈
+  // 文脈
+  const gapInfo = gapCtx(uid);
   const hist = getHistory(uid);
   const questioner = lastQ(hist);
   let qCtx = "";
   if (questioner) {
-    const qn = SAGES[questioner]?.name;
-    qCtx = `\n[文脈: 前ターンで${qn}が質問した。この返信はその回答。${qn}が最初に反応すること。]`;
+    qCtx = `\n[文脈: 前ターンで${SAGES[questioner]?.name}が質問。その人が最初に反応。]`;
   }
+  const ex = countExchanges(uid);
+  let phase = "\n[序盤。聞く・引き出す。アドバイスしない。]";
+  if (ex > 3 && ex <= 6) phase = "\n[中盤。気持ちの整理。]";
+  else if (ex > 6) phase = "\n[終盤。アドバイスOK。]";
 
-  // やり取り回数
-  const exchanges = countExchanges(uid);
-  let phaseCtx = "";
-  if (exchanges <= 3) phaseCtx = "\n[フェーズ: 序盤。聞く・引き出す。アドバイスしない。短く。]";
-  else if (exchanges <= 6) phaseCtx = "\n[フェーズ: 中盤。気持ちの整理を手伝う。]";
-  else phaseCtx = "\n[フェーズ: 終盤。ユーザーが十分話した。必要ならアドバイスOK。]";
+  const tc = (turnCounter.get(uid) || 0) + 1;
+  turnCounter.set(uid, tc);
 
-  // 履歴に追加
   addHist(uid, "user", msg);
 
-  // Claude用メッセージ構築
   const cMsgs = hist.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
-  cMsgs.push({ role: "user", content: msg + gapInfo + qCtx + phaseCtx });
+  cMsgs.push({ role: "user", content: msg + gapInfo + qCtx + phase });
 
   try {
     const res = await anthropic.messages.create({
@@ -342,22 +345,14 @@ async function handleEvent(event) {
     });
 
     const raw = res.content[0]?.text || "";
-    console.log("Raw:", raw.substring(0, 200));
+    console.log("Raw:", raw.substring(0, 300));
 
-    let parsed;
-    try {
-      parsed = JSON.parse(raw.replace(/```json\s?|```/g, "").trim());
-    } catch (e) {
-      console.error("Parse err:", e.message);
-      addHist(uid, "assistant", raw);
-      return sendLine(event.replyToken, [
-        { type: "text", text: raw.slice(0, 4900), sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
-      ]);
-    }
-
+    // パース（フォールバック付き）
+    const parsed = parseResponse(raw);
     const messages = parsed.messages || [];
+
     if (!messages.length) {
-      return sendLine(event.replyToken, [
+      return replyLine(event.replyToken, [
         { type: "text", text: "…もう少し聞かせて。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
       ]);
     }
@@ -365,29 +360,55 @@ async function handleEvent(event) {
     // 履歴保存
     addHist(uid, "assistant", messages.map((m) => `${SAGES[m.speaker]?.name || m.speaker}: ${m.text}`).join("\n"));
 
-    // LINE メッセージ構築
-    const lineMsgs = messages.slice(0, 4).map((m) => {
+    // LINEメッセージ構築
+    const allMsgs = messages.slice(0, 4).map((m) => {
       const sg = SAGES[m.speaker];
       return { type: "text", text: m.text, sender: { name: sg?.name || "哲子の部屋", iconUrl: sg?.iconUrl } };
     });
 
-    // スタンプ判定
-    if (lineMsgs.length <= 3 && shouldSticker(uid)) {
+    // スタンプ
+    const stickerMood = parsed.sticker_mood;
+    if (stickerMood && STK[stickerMood] && allMsgs.length <= 3 && tc > 2) {
       const spkIds = messages.map((m) => m.speaker);
       const sender = pickStkSender(uid, spkIds);
       if (sender) {
-        const m = mood(msg);
-        const stk = pick(STK[m] || STK.listening);
+        const stk = pick(STK[stickerMood]);
         const sg = SAGES[sender];
-        lineMsgs.push({ type: "sticker", packageId: stk.p, stickerId: stk.s, sender: { name: sg.name, iconUrl: sg.iconUrl } });
+        allMsgs.push({
+          type: "sticker", packageId: stk.p, stickerId: stk.s,
+          sender: { name: sg.name, iconUrl: sg.iconUrl },
+        });
       }
     }
 
-    return sendLine(event.replyToken, lineMsgs);
+    // --- 送信 ---
+    if (allMsgs.length === 1) {
+      return replyLine(event.replyToken, allMsgs);
+    }
+
+    // 1通目: Reply（無料）
+    await replyLine(event.replyToken, [allMsgs[0]]);
+
+    // 2通目以降: Push（遅延）
+    for (let i = 1; i < allMsgs.length; i++) {
+      await sleep(800 + Math.random() * 1200);
+      await pushLine(uid, [allMsgs[i]]);
+    }
+
   } catch (err) {
     console.error("API err:", err.message);
-    return sendLine(event.replyToken, [
+    return replyLine(event.replyToken, [
       { type: "text", text: "…ちょっと待ってね。また話しかけて。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
+    ]);
+  }
+}
+
+// ============ followイベント ============
+async function handleFollow(event) {
+  const uid = event.source.userId;
+  if (getHistory(uid).length > 0) {
+    await replyLine(event.replyToken, [
+      { type: "text", text: "…おかえり。待ってたよ。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
     ]);
   }
 }
@@ -397,7 +418,10 @@ const app = express();
 app.post("/webhook", express.json(), async (req, res) => {
   res.status(200).send("OK");
   try {
-    for (const ev of req.body.events || []) await handleEvent(ev);
+    for (const ev of req.body.events || []) {
+      if (ev.type === "message") await handleEvent(ev);
+      else if (ev.type === "follow") await handleFollow(ev);
+    }
   } catch (e) { console.error("Webhook err:", e.message); }
 });
 app.get("/", (_, res) => res.send("哲子の部屋 Bot running"));
