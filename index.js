@@ -25,11 +25,11 @@ function addHist(uid, role, content) {
 
 // ============ 賢者 ============
 const SAGES = {
-  socrates:  { name: "ソクラテス", iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=So&backgroundColor=c0392b&textColor=ffffff&size=200" },
-  nietzsche: { name: "ニーチェ",   iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ni&backgroundColor=e67e22&textColor=ffffff&size=200" },
-  buddha:    { name: "仏陀",       iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Bu&backgroundColor=27ae60&textColor=ffffff&size=200" },
-  confucius: { name: "孔子",       iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ko&backgroundColor=2c3e50&textColor=ffffff&size=200" },
-  jung:      { name: "ユング",     iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ju&backgroundColor=8e44ad&textColor=ffffff&size=200" },
+  socrates:  { name: "ソクラテス", iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/socrates.png" },
+  nietzsche: { name: "ニーチェ",   iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/nietzsche.png" },
+  buddha:    { name: "仏陀",       iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/buddha.png" },
+  confucius: { name: "孔子",       iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/confucius.png" },
+  jung:      { name: "ユング",     iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/jung.png" },
 };
 const SAGE_IDS = Object.keys(SAGES);
 const NAME2ID = {};
