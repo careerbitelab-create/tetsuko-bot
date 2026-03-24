@@ -1,25 +1,51 @@
 const express = require("express");
-const { messagingApi, middleware } = require("@line/bot-sdk");
+const crypto = require("crypto");
 const Anthropic = require("@anthropic-ai/sdk");
 
 // ============================================================
 // 環境変数
 // ============================================================
-const config = {
-  channelSecret: process.env.LINE_CHANNEL_SECRET,
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-};
-
-const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+const CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET;
+const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 // ============================================================
 // クライアント初期化
 // ============================================================
-const client = new messagingApi.MessagingApiClient({
-  channelAccessToken: config.channelAccessToken,
-});
+const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
-const anthropic = new Anthropic({ apiKey: anthropicApiKey });
+// ============================================================
+// LINE署名検証
+// ============================================================
+function validateSignature(body, signature) {
+  const hash = crypto
+    .createHmac("SHA256", CHANNEL_SECRET)
+    .update(body)
+    .digest("base64");
+  return hash === signature;
+}
+
+// ============================================================
+// LINE返信関数
+// ============================================================
+async function replyMessage(replyToken, text) {
+  const res = await fetch("https://api.line.me/v2/bot/message/reply", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${CHANNEL_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify({
+      replyToken,
+      messages: [{ type: "text", text }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    console.error("LINE reply error:", res.status, err);
+  }
+  return res;
+}
 
 // ============================================================
 // システムプロンプト（5人の賢者）
@@ -68,12 +94,13 @@ const SYSTEM_PROMPT = `あなたは「哲子の部屋」という対話空間の
 // ============================================================
 // メッセージ処理
 // ============================================================
-async function handleMessage(event) {
+async function handleEvent(event) {
   if (event.type !== "message" || event.message.type !== "text") {
-    return null;
+    return;
   }
 
   const userMessage = event.message.text;
+  console.log("Received message:", userMessage);
 
   // 「使い方」系のメッセージ
   if (
@@ -81,19 +108,13 @@ async function handleMessage(event) {
     userMessage === "ヘルプ" ||
     userMessage === "help"
   ) {
-    return client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [
-        {
-          type: "text",
-          text: "🏛 ようこそ「哲子の部屋」へ\n\nあなたの悩みや相談を送ってください。\n5人の賢者（ソクラテス、ニーチェ、仏陀、孔子、ユング）が、それぞれの視点からアドバイスをお届けします。\n\n💡 例：\n・「転職するか悩んでいます」\n・「人間関係がうまくいきません」\n・「自分に自信が持てません」\n\n何でもお気軽にどうぞ！",
-        },
-      ],
-    });
+    return replyMessage(
+      event.replyToken,
+      "🏛 ようこそ「哲子の部屋」へ\n\nあなたの悩みや相談を送ってください。\n5人の賢者（ソクラテス、ニーチェ、仏陀、孔子、ユング）が、それぞれの視点からアドバイスをお届けします。\n\n💡 例：\n・「上司と合わなくてしんどい」\n・「やりたいことが見つからない」\n・「友達と比べて焦る」\n\n何でもお気軽にどうぞ！"
+    );
   }
 
   try {
-    // Claude APIで5人の賢者の回答を生成
     const response = await anthropic.messages.create({
       model: "claude-haiku-4-5-20251001",
       max_tokens: 1500,
@@ -102,27 +123,20 @@ async function handleMessage(event) {
     });
 
     const replyText =
-      response.content[0]?.text || "申し訳ありません、回答を生成できませんでした。";
+      response.content[0]?.text ||
+      "申し訳ありません、回答を生成できませんでした。";
 
-    // LINEの5000文字制限対応
     const truncated =
       replyText.length > 4900 ? replyText.slice(0, 4900) + "\n…" : replyText;
 
-    return client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: "text", text: truncated }],
-    });
+    console.log("Sending reply, length:", truncated.length);
+    return replyMessage(event.replyToken, truncated);
   } catch (err) {
-    console.error("Claude API error:", err);
-    return client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [
-        {
-          type: "text",
-          text: "⚠️ 賢者たちが瞑想中のようです…\nしばらくしてからもう一度お試しください。",
-        },
-      ],
-    });
+    console.error("Claude API error:", err.message);
+    return replyMessage(
+      event.replyToken,
+      "⚠️ 賢者たちが瞑想中のようです…\nしばらくしてからもう一度お試しください。"
+    );
   }
 }
 
@@ -131,23 +145,39 @@ async function handleMessage(event) {
 // ============================================================
 const app = express();
 
-// Webhook エンドポイント
-app.post("/webhook", middleware(config), async (req, res) => {
+// Webhookエンドポイント
+app.post("/webhook", express.raw({ type: "*/*" }), async (req, res) => {
+  const signature = req.headers["x-line-signature"];
+  const body = req.body.toString();
+
+  // 署名検証
+  if (!validateSignature(body, signature)) {
+    console.error("Invalid signature");
+    return res.status(401).send("Invalid signature");
+  }
+
+  // すぐに200を返す（LINEのタイムアウト防止）
+  res.status(200).send("OK");
+
+  // イベント処理（バックグラウンド）
   try {
-    const results = await Promise.all(req.body.events.map(handleMessage));
-    res.json(results);
+    const parsed = JSON.parse(body);
+    const events = parsed.events || [];
+    console.log("Events received:", events.length);
+
+    for (const event of events) {
+      await handleEvent(event);
+    }
   } catch (err) {
-    console.error("Webhook error:", err);
-    res.status(500).end();
+    console.error("Event processing error:", err.message);
   }
 });
 
-// ヘルスチェック（Render用）
+// ヘルスチェック
 app.get("/", (req, res) => {
   res.send("🏛 哲子の部屋 Bot is running");
 });
 
-// サーバー起動
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`哲子の部屋 Bot is running on port ${PORT}`);
