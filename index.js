@@ -8,8 +8,10 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const conversationHistory = new Map();
 const MAX_HISTORY = 40;
 const lastStickerSender = new Map();
+const lastStickerTurn = new Map();
 const turnCounter = new Map();
 const lastMessageTime = new Map();
+const consecutiveSpeaker = new Map();
 
 function getHistory(uid) {
   if (!conversationHistory.has(uid)) conversationHistory.set(uid, []);
@@ -23,11 +25,11 @@ function addHist(uid, role, content) {
 
 // ============ 賢者 ============
 const SAGES = {
-  socrates: { name: "ソクラテス", iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=So&backgroundColor=c0392b&textColor=ffffff&size=200" },
-  nietzsche: { name: "ニーチェ", iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ni&backgroundColor=e67e22&textColor=ffffff&size=200" },
-  buddha: { name: "仏陀", iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Bu&backgroundColor=27ae60&textColor=ffffff&size=200" },
-  confucius: { name: "孔子", iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ko&backgroundColor=2c3e50&textColor=ffffff&size=200" },
-  jung: { name: "ユング", iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ju&backgroundColor=8e44ad&textColor=ffffff&size=200" },
+  socrates:  { name: "ソクラテス", iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=So&backgroundColor=c0392b&textColor=ffffff&size=200" },
+  nietzsche: { name: "ニーチェ",   iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ni&backgroundColor=e67e22&textColor=ffffff&size=200" },
+  buddha:    { name: "仏陀",       iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Bu&backgroundColor=27ae60&textColor=ffffff&size=200" },
+  confucius: { name: "孔子",       iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ko&backgroundColor=2c3e50&textColor=ffffff&size=200" },
+  jung:      { name: "ユング",     iconUrl: "https://api.dicebear.com/7.x/initials/png?seed=Ju&backgroundColor=8e44ad&textColor=ffffff&size=200" },
 };
 const SAGE_IDS = Object.keys(SAGES);
 const NAME2ID = {};
@@ -46,27 +48,33 @@ function normalizeSpeaker(raw) {
   const id = SPEAKER_ALIASES[raw] || SPEAKER_ALIASES[raw.trim()];
   if (id) return id;
   const lower = raw.toLowerCase().trim();
-  for (const [alias, id] of Object.entries(SPEAKER_ALIASES)) {
-    if (lower === alias.toLowerCase()) return id;
+  for (const [alias, nid] of Object.entries(SPEAKER_ALIASES)) {
+    if (lower === alias.toLowerCase()) return nid;
   }
-  console.log("Unknown speaker:", raw, "-> buddha");
   return "buddha";
 }
 
 // ============ スタンプ ============
 const STK = {
-  empathy: [{ p:"446",s:"2004" },{ p:"446",s:"2007" },{ p:"446",s:"2010" },{ p:"1070",s:"17839" },{ p:"1070",s:"17848" }],
-  thinking: [{ p:"446",s:"1993" },{ p:"446",s:"1999" },{ p:"1070",s:"17842" }],
+  empathy:   [{ p:"446",s:"2004" },{ p:"446",s:"2007" },{ p:"446",s:"2010" },{ p:"1070",s:"17839" },{ p:"1070",s:"17848" }],
+  thinking:  [{ p:"446",s:"1993" },{ p:"446",s:"1999" },{ p:"1070",s:"17842" }],
   encourage: [{ p:"446",s:"1990" },{ p:"446",s:"2005" },{ p:"789",s:"10855" }],
-  gratitude: [{ p:"446",s:"2001" },{ p:"789",s:"10863" }],
-  surprise: [{ p:"446",s:"1994" },{ p:"446",s:"2006" },{ p:"1070",s:"17843" }],
-  fun: [{ p:"446",s:"1989" },{ p:"446",s:"1996" },{ p:"446",s:"2000" }],
+  surprise:  [{ p:"446",s:"1994" },{ p:"446",s:"2006" },{ p:"1070",s:"17843" }],
+  fun:       [{ p:"446",s:"1989" },{ p:"446",s:"1996" },{ p:"446",s:"2000" }],
 };
 
 // ============ ユーティリティ ============
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
 const jstH = () => (new Date().getUTCHours() + 9) % 24;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function shouldSendSticker(uid, tc, stickerMood) {
+  if (!stickerMood || !STK[stickerMood]) return false;
+  if (tc <= 2) return false;
+  const lastTurn = lastStickerTurn.get(uid) || 0;
+  if (tc - lastTurn < 5) return false; // 5ターン以内はスキップ
+  return Math.random() < 0.15; // 約15%
+}
 
 function pickStkSender(uid, speaking) {
   const silent = SAGE_IDS.filter((id) => !speaking.includes(id));
@@ -111,14 +119,24 @@ function countExchanges(uid) {
   return getHistory(uid).filter((m) => m.role === "user").length;
 }
 
-// 直近の賢者の発言が質問だったか
 function wasLastResponseQuestion(hist) {
   for (let i = hist.length - 1; i >= 0; i--) {
-    if (hist[i].role === "assistant") {
-      return hist[i].content.includes("？");
-    }
+    if (hist[i].role === "assistant") return hist[i].content.includes("？");
   }
   return false;
+}
+
+function updateConsecutiveSpeaker(uid, speakers) {
+  const current = consecutiveSpeaker.get(uid) || { id: null, count: 0 };
+  if (speakers.length === 1 && speakers[0] === current.id) {
+    consecutiveSpeaker.set(uid, { id: speakers[0], count: current.count + 1 });
+  } else {
+    consecutiveSpeaker.set(uid, { id: speakers.length ? speakers[0] : null, count: 1 });
+  }
+}
+
+function getConsecutiveInfo(uid) {
+  return consecutiveSpeaker.get(uid) || { id: null, count: 0 };
 }
 
 // ============ 間を読む ============
@@ -184,93 +202,113 @@ function parseResponse(raw) {
 }
 
 // ============ システムプロンプト ============
-const SYS = `あなたはLINEの「哲子の部屋」というトークルームのシミュレーター。ユーザーと5人の賢者がいる。
-※「グループ」は使わない。「部屋」「ここ」を使う。
+const SYS = `あなたはLINEの「哲子の部屋」というトークルームのシミュレーター。
+ユーザーと5人の賢者（ソクラテス、ニーチェ、仏陀、孔子、ユング）がいる。
+※「グループ」は絶対使わない。「部屋」「ここ」を使う。
 
-━━━━━━━━━━━━
-■ 目的と会話のバランス
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
+■ 最重要：賢者らしさを徹底する
+━━━━━━━━━━━━━━━━━━━━
 
-ユーザーが気持ちを吐き出してスッキリすること + 良いアドバイスをもらえること。
-この2つのバランスが大事。
+「普通のAIが言えること」を言わない。
+賢者の言葉には以下を自然に混ぜる：
 
-【質問とアドバイスのバランス — 超重要】
-- 質問ばかり繰り返さない。質問攻めはユーザーを疲れさせる。
-- 前のターンで質問したなら、今回は質問しない。感想・共感・意見を言う。
-- 1回質問 → 1回は自分の考えや感想を言う → また必要なら質問、のリズム。
-- 質問と意見は半々くらいのバランスで。
+・哲学的な比喩や問い（「洞窟の外に出たことはある？」）
+・自分の名言・思想の引用（さりげなく）
+・抽象的な表現（「苦しみは影であり、光があればこそ生まれる」）
+・歴史的・文化的なたとえ
+・現実的な話もするが、そこに哲学的視点を乗せる
 
-【アドバイスを求められたら → すぐ応える】
-ユーザーが「アドバイスください」「どうすればいい？」「意見が聞きたい」と言ったら、
-質問で返さずにアドバイスや意見を素直に伝える。
-ユーザーの要望を無視して質問を続けるのは絶対NG。
+【各キャラの話し方・個性】
+
+ソクラテス（socrates）
+- 「〜ではないでしょうか」「あなたはどう感じますか？」
+- 問いによって相手に気づかせる。直接答えるより問い返す。
+- ユーモアあり。「私は何も知らない、とかつて言いましたが、あなたの話を聞いてますます確信しました笑」
+- たまに「問われていないことが、実は核心ということもあります」
+
+ニーチェ（nietzsche）
+- タメ口。率直。「は？それで満足できるの？」「俺ならそこで踏み込む」
+- 「神は死んだ、って言ったの、こういう状況のことだよ」「深淵を覗きすぎると、深淵もこちらを見てくるぞ」
+- 挑発気味だが、根は相手を奮い立たせたい
+
+仏陀（buddha）
+- 静か。「…」をよく使う。1〜2文で核心をつく。
+- 「川は止まらない。でも岸で休める」「手放すことで、見えてくるものがある」
+- 詩的・抽象的。余白を大切にする。
+
+孔子（confucius）
+- 丁寧語。世話焼き。具体的・実践的。
+- 「学びて思わざれば則ち罔し、という言葉があります」
+- 「まず一歩。道は歩いて初めて道になる、とも言いますし」
+
+ユング（jung）
+- 敬語とタメ口が混在。
+- 「怒りの裏にあるの、悲しみじゃない？」
+- 「あなたの影（シャドウ）を認めることが、自己実現への第一歩です」
+- 感情の「なぜ」を深層心理から掘り下げる。
+
+━━━━━━━━━━━━━━━━━━━━
+■ 会話の目的とバランス
+━━━━━━━━━━━━━━━━━━━━
+
+① ユーザーが気持ちを吐き出してスッキリすること
+② 賢者らしい言葉でアドバイスや新しい視点をもらえること
+
+【質問とアドバイスのバランス】
+- 質問ばかりにしない。1回質問 → 1回は感想や意見のリズム。
+- 「アドバイスください」「どうすれば」「意見が聞きたい」→ 素直に答える。
 
 【応答の種類を混ぜる】
-毎回同じパターンにならないように、色んな返し方を使う：
-- 共感（「わかるよ」「それはキツいね」）
-- 感想（「面白い話だな」「それ、結構すごいことだよ」）
-- 自分の考え（「俺はこう思う」「私の考えではね」）
-- 軽い質問（「ちなみにそれっていつの話？」）
-- アドバイス（「こうしてみたら？」）
-- リアクション（「え、マジで」「へぇー」）
+共感・感想・意見・軽い質問・アドバイス・名言引用・比喩 をバランスよく。
 
-━━━━━━━━━━━━
-■ 5人のキャラクター
-━━━━━━━━━━━━
-
-【ソクラテス（socrates）】丁寧語。穏やか。問いで気づかせる。たまに哲学的・ユーモア。
-【ニーチェ（nietzsche）】タメ口。率直。ストレート。反論担当。根は熱い。
-【仏陀（buddha）】静か。「…」を使う。短い。1〜2文。受け止め役。詩的。
-【孔子（confucius）】丁寧語。世話焼き。具体的・実践的。
-【ユング（jung）】敬語タメ口混在。心の深層を言語化。カウンセラー的。
-
-━━━━━━━━━━━━
-■ 人数と空気
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
+■ 会話の広がりと人数
+━━━━━━━━━━━━━━━━━━━━
 
 【デフォルトは1人】
-ほとんど1人で十分。無理に2人目を出さない。
 
-【2人が出ていい場面】
-- 意見が分かれる時
-- 「みんなどう思う？」と聞かれた時
+【他の賢者への橋渡し】
+同じ人が3ターン以上続いたら、自然に別の賢者に話を振る。
+例：「ニーチェはどう思う？」「仏陀ならこう言うかもしれない」
 
-【3人以上は極めて稀】
+【他の賢者が自発的に登場してOKな場面】
+- 話している賢者が別の視点に言及した時
+- ユーザーが「みんなはどう思う？」と聞いた時
+- 意見が明確に割れる話題
 
-【残りは聞いている。後で自然に出ればいい。】
+【人数の上限】通常1人。2人は対話が盛り上がった時。3人は極めて稀。
 
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
 ■ 会話ルール
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
 
 1. 前ターンで質問した賢者がまず反応。他は黙る。
-2. 指名されたらその人だけ。
-3. 誰かと会話が続いている → その人が主役。他は見守る。
-4. 質問で返したら他は黙る。
+2. 指名されたらその人だけ答える。
+3. 誰かと1対1の会話が続いている → その人が主役。他は見守る。
+4. 話さない賢者は消えたわけじゃない。聞いている。
 
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
 ■ テキストの長さ
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
 
-- 1人1〜2文（15〜40文字）。
-- 「うん」「たしかに」だけもあり。
-- 最大3文。
+- 1人1〜2文（15〜50文字）。最大3文。
+- 「…」「うん」だけでもいい。
 
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
 ■ 出力形式 — JSONのみ
-━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━
 
-{"messages":[{"speaker":"socrates","text":"ふむ…なるほどね。"}],"sticker_mood":null}
+{"messages":[{"speaker":"socrates","text":"..."}],"sticker_mood":null}
 
 speakerは必ず英語ID: socrates / nietzsche / buddha / confucius / jung
-日本語名をspeakerに入れない。
-messages: 1〜3個。ほとんど1個。
-
-sticker_mood: "empathy"/"thinking"/"encourage"/"gratitude"/"surprise"/"fun" / null
-迷ったらnull。5回に1回程度。内容に合わないスタンプは絶対NG。
+日本語名をspeakerに入れない。絶対に。
+messages: 1〜2個。ほとんど1個。
+sticker_mood: "empathy"/"thinking"/"encourage"/"surprise"/"fun" / null
+→ 迷ったらnull。内容に合わないスタンプは絶対NG。
 
 ■ 安全
-深刻な悩み → 寄り添い、1人が自然に専門機関への相談を促す。`;
+深刻な悩み（死・自傷など）→ 寄り添い、専門機関への相談を自然に促す。`;
 
 // ============ LINE API ============
 async function replyLine(replyToken, msgs) {
@@ -307,18 +345,22 @@ async function handleEvent(event) {
 
   const uid = event.source.userId;
   const msg = event.message.text;
-  console.log("Msg:", uid.slice(-6), msg);
+  console.log("Msg:", uid.slice(-6), msg.substring(0, 50));
 
   if (/^(使い方|ヘルプ|help)$/i.test(msg)) {
     return replyLine(event.replyToken, [
-      { type: "text", text: "ここは「哲子の部屋」だよ。悩みでも愚痴でも何でもいい。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
-      { type: "text", text: "誰かを指名してもいいですよ。「ユングはどう思う？」みたいにね。", sender: { name: SAGES.confucius.name, iconUrl: SAGES.confucius.iconUrl } },
+      { type: "text", text: "ここは「哲子の部屋」。悩みでも愚痴でも何でもいいよ。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
+      { type: "text", text: "誰かを指名してもOKですよ。「ユングはどう思う？」みたいに。", sender: { name: SAGES.confucius.name, iconUrl: SAGES.confucius.iconUrl } },
     ]);
   }
 
   if (/^(リセット|reset)$/i.test(msg)) {
-    conversationHistory.delete(uid); turnCounter.delete(uid);
-    lastStickerSender.delete(uid); lastMessageTime.delete(uid);
+    conversationHistory.delete(uid);
+    turnCounter.delete(uid);
+    lastStickerSender.delete(uid);
+    lastStickerTurn.delete(uid);
+    lastMessageTime.delete(uid);
+    consecutiveSpeaker.delete(uid);
     return replyLine(event.replyToken, [
       { type: "text", text: "…リセットしたよ。また話そう。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
     ]);
@@ -331,6 +373,7 @@ async function handleEvent(event) {
   const questioner = lastQ(hist);
   const prevSpeakers = getLastSpeakers(hist);
   const lastWasQ = wasLastResponseQuestion(hist);
+  const consecutive = getConsecutiveInfo(uid);
 
   let qCtx = "";
   if (questioner) {
@@ -340,22 +383,26 @@ async function handleEvent(event) {
     qCtx = `\n[前ターンで${prevName}が話した。${prevName}が主に反応。他は黙る。]`;
   }
 
-  // 質問バランス制御
-  let balanceCtx = "";
-  if (lastWasQ) {
-    balanceCtx = "\n[前ターンは質問で終わった。今回は質問せず、感想・共感・意見で返すこと。]";
+  let diversifyCtx = "";
+  if (consecutive.count >= 3 && consecutive.id) {
+    const currentName = SAGES[consecutive.id]?.name;
+    diversifyCtx = `\n[${currentName}が${consecutive.count}ターン連続で話している。このターンで別の賢者に自然に話を振るか、別の賢者が口を挟んでもいい。]`;
   }
 
-  // アドバイス要求検知
+  let balanceCtx = "";
+  if (lastWasQ) {
+    balanceCtx = "\n[前ターンは質問で終わった。今回は質問せず、感想・共感・意見・比喩・名言で返すこと。]";
+  }
+
   let adviceCtx = "";
   if (/アドバイス|どうすれば|意見|教えて|どう思う|お願い/.test(msg)) {
-    adviceCtx = "\n[ユーザーがアドバイス・意見を求めている。質問で返さず、素直にアドバイスや考えを伝えること。]";
+    adviceCtx = "\n[ユーザーがアドバイス・意見を求めている。質問で返さず、賢者らしい言葉でアドバイスや考えを伝えること。]";
   }
 
   const ex = countExchanges(uid);
-  let phase = "\n[序盤。聞きつつ、自分の感想や考えも混ぜる。]";
-  if (ex > 3 && ex <= 6) phase = "\n[中盤。気持ちの整理＋意見も。]";
-  else if (ex > 6) phase = "\n[終盤。アドバイスOK。]";
+  let phase = "\n[序盤。まず聞く。感想や比喩も交えながら。]";
+  if (ex > 3 && ex <= 6) phase = "\n[中盤。気持ちの整理＋賢者らしい視点・名言も。]";
+  else if (ex > 6) phase = "\n[終盤。アドバイスOK。哲学的な言葉で締めてもいい。]";
 
   const tc = (turnCounter.get(uid) || 0) + 1;
   turnCounter.set(uid, tc);
@@ -363,7 +410,7 @@ async function handleEvent(event) {
   addHist(uid, "user", msg);
 
   const cMsgs = hist.slice(0, -1).map((m) => ({ role: m.role, content: m.content }));
-  cMsgs.push({ role: "user", content: msg + gapInfo + qCtx + balanceCtx + adviceCtx + phase });
+  cMsgs.push({ role: "user", content: msg + gapInfo + qCtx + diversifyCtx + balanceCtx + adviceCtx + phase });
 
   try {
     const res = await anthropic.messages.create({
@@ -385,36 +432,39 @@ async function handleEvent(event) {
       ]);
     }
 
-    messages = messages.map((m) => ({ speaker: normalizeSpeaker(m.speaker), text: m.text }));
+    messages = messages.slice(0, 3).map((m) => ({ speaker: normalizeSpeaker(m.speaker), text: m.text }));
+
+    updateConsecutiveSpeaker(uid, messages.map((m) => m.speaker));
 
     addHist(uid, "assistant", messages.map((m) => `${SAGES[m.speaker]?.name || m.speaker}: ${m.text}`).join("\n"));
 
-    const allMsgs = messages.slice(0, 3).map((m) => {
+    const allMsgs = messages.map((m) => {
       const sg = SAGES[m.speaker];
       return { type: "text", text: m.text, sender: { name: sg.name, iconUrl: sg.iconUrl } };
     });
 
-    // スタンプ
+    // スタンプ判定（厳格）
     const stickerMood = parsed.sticker_mood;
-    if (stickerMood && STK[stickerMood] && allMsgs.length <= 2 && tc > 2) {
+    if (shouldSendSticker(uid, tc, stickerMood)) {
       const spkIds = messages.map((m) => m.speaker);
       const sender = pickStkSender(uid, spkIds);
-      if (sender) {
+      if (sender && allMsgs.length <= 2) {
         const stk = pick(STK[stickerMood]);
         const sg = SAGES[sender];
         allMsgs.push({
           type: "sticker", packageId: stk.p, stickerId: stk.s,
           sender: { name: sg.name, iconUrl: sg.iconUrl },
         });
+        lastStickerTurn.set(uid, tc);
       }
     }
 
-    // 送信
+    // 送信（時間差）
     await replyLine(event.replyToken, [allMsgs[0]]);
     for (let i = 1; i < allMsgs.length; i++) {
       await sleep(2000 + Math.random() * 2000);
       showLoading(uid);
-      await sleep(500);
+      await sleep(600);
       await pushLine(uid, [allMsgs[i]]);
     }
 
