@@ -1,14 +1,14 @@
 {
   "name": "tetsuko-bot",
-  "version": "1.0.0",
-  "description": "哲子の部屋 - 5人の賢者が悩みに答えるLINE Bot",
+  "version": "2.0.0",
+  "description": "賢者の部屋 - 5人の賢者が悩みに答えるLINE Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "@line/bot-sdk": "^9.7.0",
+    "@supabase/supabase-js": "^2.49.0",
     "express": "^4.21.0"
   },
   "engines": {
