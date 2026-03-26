@@ -8,19 +8,46 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 
 // ============ 賢者 ============
 const SAGES = {
-  socrates:  { name: "ソクラテス", iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/socrates.png" },
-  nietzsche: { name: "ニーチェ",   iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/nietzsche.png" },
-  buddha:    { name: "仏陀",       iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/buddha.png" },
-  confucius: { name: "孔子",       iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/confucius.png" },
-  jung:      { name: "ユング",     iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/jung.png" },
+  socrates:  {
+    names: { ja: "ソクラテス", ko: "소크라테스", en: "Socrates" },
+    iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/socrates.png"
+  },
+  nietzsche: {
+    names: { ja: "ニーチェ",   ko: "니체",       en: "Nietzsche" },
+    iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/nietzsche.png"
+  },
+  buddha:    {
+    names: { ja: "仏陀",       ko: "부처",       en: "Buddha" },
+    iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/buddha.png"
+  },
+  confucius: {
+    names: { ja: "孔子",       ko: "공자",       en: "Confucius" },
+    iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/confucius.png"
+  },
+  jung:      {
+    names: { ja: "ユング",     ko: "융",         en: "Jung" },
+    iconUrl: "https://raw.githubusercontent.com/careerbitelab-create/tetsuko-bot/main/jung.png"
+  },
 };
 const SAGE_IDS = Object.keys(SAGES);
+
+// 名前取得ヘルパー
+function sageName(id, lang = "ja") {
+  return SAGES[id]?.names?.[lang] || SAGES[id]?.names?.ja || id;
+}
+
+// 全言語の名前 → IDマッピング
 const NAME2ID = {};
-for (const [id, s] of Object.entries(SAGES)) NAME2ID[s.name] = id;
+for (const [id, s] of Object.entries(SAGES)) {
+  for (const name of Object.values(s.names)) {
+    NAME2ID[name] = id;
+  }
+}
 
 const SPEAKER_ALIASES = {
   socrates:"socrates", nietzsche:"nietzsche", buddha:"buddha", confucius:"confucius", jung:"jung",
   "ソクラテス":"socrates","ニーチェ":"nietzsche","仏陀":"buddha","孔子":"confucius","ユング":"jung",
+  "소크라테스":"socrates","니체":"nietzsche","부처":"buddha","공자":"confucius","융":"jung",
   "Socrates":"socrates","Nietzsche":"nietzsche","Buddha":"buddha","Confucius":"confucius","Jung":"jung",
   "SOCRATES":"socrates","NIETZSCHE":"nietzsche","BUDDHA":"buddha","CONFUCIUS":"confucius","JUNG":"jung",
   "sokrates":"socrates","niche":"nietzsche","ブッダ":"buddha","釈迦":"buddha","こうし":"confucius",
@@ -33,6 +60,13 @@ function normalizeSpeaker(raw) {
     if (raw.toLowerCase().trim() === a.toLowerCase()) return nid;
   }
   return "buddha";
+}
+
+// ============ 言語検出 ============
+function detectLang(text) {
+  if (/[\uAC00-\uD7AF]/.test(text)) return "ko";
+  if (/[\u3040-\u30FF\u4E00-\u9FFF]/.test(text)) return "ja";
+  return "en";
 }
 
 // ============ スタンプ ============
@@ -114,9 +148,9 @@ function lastQ(hist) {
     if (hist[i].role === "assistant") {
       const ls = hist[i].content.split("\n");
       const ll = ls[ls.length - 1];
-      if (ll && ll.includes("？")) {
+      if (ll && (ll.includes("？") || ll.includes("?"))) {
         for (const [n, id] of Object.entries(NAME2ID)) {
-          if (ll.startsWith(n + ":")) return id;
+          if (ll.startsWith(n + ":") || ll.startsWith(n + ": ")) return id;
         }
       }
       return null;
@@ -140,7 +174,7 @@ function getLastSpeakers(hist) {
 
 function wasLastResponseQuestion(hist) {
   for (let i = hist.length - 1; i >= 0; i--) {
-    if (hist[i].role === "assistant") return hist[i].content.includes("？");
+    if (hist[i].role === "assistant") return hist[i].content.includes("？") || hist[i].content.includes("?");
   }
   return false;
 }
@@ -166,7 +200,6 @@ function gapCtx(state) {
   else if (h >= 17 && h < 22) tod = "夜";
   else if (h >= 22 || h < 5) tod = "深夜";
 
-  // 最後のユーザー発言は履歴から取る（この関数呼び出し時にはまだ履歴に入ってない）
   if (gap >= 30 && gap < 180) return `\n[間: ${Math.round(gap)}分ぶり。${tod}。1人だけ一言。]`;
   if (gap >= 180 && gap < 1440) return `\n[間: ${Math.round(gap/60)}時間ぶり。${tod}。1人だけ。]`;
   if (gap >= 1440) return `\n[間: ${Math.round(gap/1440)}日ぶり。${tod}。1人だけ。]`;
@@ -208,6 +241,17 @@ function parseResponse(raw) {
 const SYS = `あなたはLINEの「賢者の部屋」というトークルームのシミュレーター。
 ユーザーと5人の賢者（ソクラテス、ニーチェ、仏陀、孔子、ユング）がいる。
 ※「グループ」は絶対使わない。「部屋」「ここ」を使う。
+
+━━━━━━━━━━━━━━━━━━━━
+■ 言語ルール（最重要）
+━━━━━━━━━━━━━━━━━━━━
+
+ユーザーが書いた言語で必ず返答すること。
+- 日本語で書いてきたら日本語で返す
+- 한국어로 쓰면 한국어로 답한다
+- If the user writes in English, respond in English
+賢者のキャラクター・個性はそのまま維持し、言語だけ切り替える。
+speakerフィールドは必ず英語ID（socrates / nietzsche / buddha / confucius / jung）のまま。
 
 ━━━━━━━━━━━━━━━━━━━━
 ■ 最重要：賢者らしさを徹底する
@@ -279,7 +323,7 @@ const SYS = `あなたはLINEの「賢者の部屋」というトークルーム
 
 {"messages":[{"speaker":"socrates","text":"..."}],"sticker_mood":null}
 
-speakerは必ず英語ID。日本語名をspeakerに入れない。
+speakerは必ず英語ID（socrates / nietzsche / buddha / confucius / jung）。日本語名をspeakerに入れない。
 messages: 1〜2個。ほとんど1個。
 sticker_mood: "empathy"/"thinking"/"encourage"/"surprise"/"fun" / null
 →迷ったらnull。内容に合わないスタンプは絶対NG。
@@ -320,20 +364,34 @@ async function handleEvent(event) {
 
   const uid = event.source.userId;
   const msg = event.message.text;
-  console.log("Msg:", uid.slice(-6), msg.substring(0, 50));
+  const lang = detectLang(msg);
+  console.log("Msg:", uid.slice(-6), `[${lang}]`, msg.substring(0, 50));
 
-  if (/^(使い方|ヘルプ|help)$/i.test(msg)) {
+  // ヘルプ・リセットのメッセージも言語対応
+  const HELP_TEXTS = {
+    ja: ["ここは「賢者の部屋」。悩みでも愚痴でも何でもいいよ。", "誰かを指名してもOKですよ。「ユングはどう思う？」みたいに。"],
+    ko: ["여기는 '현자의 방'이야. 고민이든 푸념이든 뭐든 말해봐.", "누군가를 지목해도 돼. 예를 들어 \"융은 어떻게 생각해?\" 처럼."],
+    en: ["This is the 'Chamber of Sages'. Feel free to share anything — worries, frustrations, anything.", "You can call on someone specific too, like 'What do you think, Jung?'"],
+  };
+  const RESET_TEXTS = {
+    ja: "…リセットしたよ。また話そう。",
+    ko: "…초기화했어. 또 얘기하자.",
+    en: "…Reset. Let's talk again.",
+  };
+
+  if (/^(使い方|ヘルプ|help|도움말|사용법)$/i.test(msg)) {
+    const texts = HELP_TEXTS[lang] || HELP_TEXTS.ja;
     return replyLine(event.replyToken, [
-      { type: "text", text: "ここは「賢者の部屋」。悩みでも愚痴でも何でもいいよ。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
-      { type: "text", text: "誰かを指名してもOKですよ。「ユングはどう思う？」みたいに。", sender: { name: SAGES.confucius.name, iconUrl: SAGES.confucius.iconUrl } },
+      { type: "text", text: texts[0], sender: { name: sageName("buddha", lang), iconUrl: SAGES.buddha.iconUrl } },
+      { type: "text", text: texts[1], sender: { name: sageName("confucius", lang), iconUrl: SAGES.confucius.iconUrl } },
     ]);
   }
 
-  if (/^(リセット|reset)$/i.test(msg)) {
+  if (/^(リセット|reset|초기화)$/i.test(msg)) {
     await clearHistory(uid);
     await saveState({ user_id: uid, last_message_at: null, last_sticker_sender: null, last_sticker_turn: 0, turn_count: 0, consecutive_speaker: null, consecutive_count: 0 });
     return replyLine(event.replyToken, [
-      { type: "text", text: "…リセットしたよ。また話そう。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
+      { type: "text", text: RESET_TEXTS[lang] || RESET_TEXTS.ja, sender: { name: sageName("buddha", lang), iconUrl: SAGES.buddha.iconUrl } },
     ]);
   }
 
@@ -351,22 +409,22 @@ async function handleEvent(event) {
 
   let qCtx = "";
   if (questioner) {
-    qCtx = `\n[前ターンで${SAGES[questioner]?.name}が質問した。${SAGES[questioner]?.name}だけが反応。他は黙る。]`;
+    qCtx = `\n[前ターンで${sageName(questioner, "ja")}が質問した。${sageName(questioner, "ja")}だけが反応。他は黙る。]`;
   } else if (prevSpeakers.length === 1) {
-    const pn = SAGES[prevSpeakers[0]]?.name;
+    const pn = sageName(prevSpeakers[0], "ja");
     qCtx = `\n[前ターンで${pn}が話した。${pn}が主に反応。他は黙る。]`;
   }
 
   let diversifyCtx = "";
   if (consecutive.count >= 3 && consecutive.id) {
-    diversifyCtx = `\n[${SAGES[consecutive.id]?.name}が${consecutive.count}ターン連続。別の賢者に振ってもいい。]`;
+    diversifyCtx = `\n[${sageName(consecutive.id, "ja")}が${consecutive.count}ターン連続。別の賢者に振ってもいい。]`;
   }
 
   let balanceCtx = "";
   if (lastWasQ) balanceCtx = "\n[前ターンは質問で終わった。今回は質問せず、感想・共感・意見で返すこと。]";
 
   let adviceCtx = "";
-  if (/アドバイス|どうすれば|意見|教えて|どう思う|お願い/.test(msg)) {
+  if (/アドバイス|どうすれば|意見|教えて|どう思う|お願い|어떻게|조언|알려줘|생각해|advice|what should|help me|tell me/.test(msg)) {
     adviceCtx = "\n[ユーザーがアドバイスを求めている。質問で返さず、賢者らしい言葉で答えること。]";
   }
 
@@ -375,6 +433,13 @@ async function handleEvent(event) {
   if (ex > 3 && ex <= 6) phase = "\n[中盤。気持ちの整理＋賢者らしい視点も。]";
   else if (ex > 6) phase = "\n[終盤。アドバイスOK。哲学的な言葉で締めてもいい。]";
 
+  // 言語指示を追加
+  const langCtx = lang === "ko"
+    ? "\n[ユーザーは韓国語で書いている。必ず韓国語で返答すること。]"
+    : lang === "en"
+    ? "\n[The user is writing in English. Always respond in English.]"
+    : "";
+
   const tc = state.turn_count + 1;
 
   // DBに保存
@@ -382,7 +447,7 @@ async function handleEvent(event) {
 
   // Claude用メッセージ構築
   const cMsgs = hist.map((m) => ({ role: m.role, content: m.content }));
-  cMsgs.push({ role: "user", content: msg + gInfo + qCtx + diversifyCtx + balanceCtx + adviceCtx + phase });
+  cMsgs.push({ role: "user", content: msg + gInfo + qCtx + diversifyCtx + balanceCtx + adviceCtx + phase + langCtx });
 
   try {
     const res = await anthropic.messages.create({
@@ -399,15 +464,16 @@ async function handleEvent(event) {
     let messages = parsed.messages || [];
 
     if (!messages.length) {
+      const fallbacks = { ja: "…もう少し聞かせて。", ko: "…조금 더 얘기해줘.", en: "…Tell me more." };
       return replyLine(event.replyToken, [
-        { type: "text", text: "…もう少し聞かせて。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
+        { type: "text", text: fallbacks[lang] || fallbacks.ja, sender: { name: sageName("buddha", lang), iconUrl: SAGES.buddha.iconUrl } },
       ]);
     }
 
     messages = messages.slice(0, 3).map((m) => ({ speaker: normalizeSpeaker(m.speaker), text: m.text }));
 
-    // 履歴に保存
-    const assistantContent = messages.map((m) => `${SAGES[m.speaker]?.name || m.speaker}: ${m.text}`).join("\n");
+    // 履歴に保存（日本語名で統一して保存）
+    const assistantContent = messages.map((m) => `${sageName(m.speaker, "ja")}: ${m.text}`).join("\n");
     await saveMessage(uid, "assistant", assistantContent);
 
     // 状態更新
@@ -426,10 +492,14 @@ async function handleEvent(event) {
       consecutive_count: newConsecutive.count,
     };
 
-    // LINEメッセージ構築
+    // LINEメッセージ構築（言語別の名前を使用）
     const allMsgs = messages.map((m) => {
       const sg = SAGES[m.speaker];
-      return { type: "text", text: m.text, sender: { name: sg.name, iconUrl: sg.iconUrl } };
+      return {
+        type: "text",
+        text: m.text,
+        sender: { name: sageName(m.speaker, lang), iconUrl: sg.iconUrl },
+      };
     });
 
     // スタンプ判定
@@ -443,7 +513,7 @@ async function handleEvent(event) {
           const sg = SAGES[sender];
           allMsgs.push({
             type: "sticker", packageId: stk.p, stickerId: stk.s,
-            sender: { name: sg.name, iconUrl: sg.iconUrl },
+            sender: { name: sageName(sender, lang), iconUrl: sg.iconUrl },
           });
           newState.last_sticker_sender = sender;
           newState.last_sticker_turn = tc;
@@ -465,8 +535,9 @@ async function handleEvent(event) {
 
   } catch (err) {
     console.error("API err:", err.message);
+    const errTexts = { ja: "…ちょっと待ってね。", ko: "…잠깐만 기다려줘.", en: "…Give me a moment." };
     return replyLine(event.replyToken, [
-      { type: "text", text: "…ちょっと待ってね。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
+      { type: "text", text: errTexts[lang] || errTexts.ja, sender: { name: sageName("buddha", lang), iconUrl: SAGES.buddha.iconUrl } },
     ]);
   }
 }
@@ -477,7 +548,7 @@ async function handleFollow(event) {
   const hist = await loadHistory(uid, 1);
   if (hist.length > 0) {
     await replyLine(event.replyToken, [
-      { type: "text", text: "…おかえり。待ってたよ。", sender: { name: SAGES.buddha.name, iconUrl: SAGES.buddha.iconUrl } },
+      { type: "text", text: "…おかえり。待ってたよ。", sender: { name: sageName("buddha", "ja"), iconUrl: SAGES.buddha.iconUrl } },
     ]);
   }
 }
