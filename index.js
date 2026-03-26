@@ -435,7 +435,7 @@ async function handleEvent(event) {
 
   // 言語指示を追加
   const langCtx = lang === "ko"
-    ? "\n[ユーザーは韓国語で書いている。必ず韓国語で返答すること。]"
+    ? "\n[ユーザーは韓国語で書いている。必ず最後まで韓国語で返答すること。トークの途中で日本語に変わったりしないこと。]"
     : lang === "en"
     ? "\n[The user is writing in English. Always respond in English.]"
     : "";
